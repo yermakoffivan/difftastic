@@ -536,15 +536,8 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
                 language: language.clone(),
                 atom_nodes: [
                     // Work around https://github.com/tree-sitter/tree-sitter-haskell/issues/102
-                    //
-                    // This used to be qualified_variable,
-                    // qualified_module and qualified_constructor,
-                    // which the grammar has since merged into a
-                    // single node.
                     "qualified",
                     // Work around https://github.com/tree-sitter/tree-sitter-haskell/issues/107
-                    //
-                    // This used to be called strict_type.
                     "strict_field",
                 ]
                 .into_iter()
@@ -2155,22 +2148,15 @@ mod tests {
         }
     }
 
-    /// Language configuration refers to tree-sitter node names, such
-    /// as `atom_nodes`. Names that don't occur in the grammar are
-    /// silently ignored when diffing, so a typo (or a grammar upgrade
-    /// that renames nodes) leaves us with configuration that does
-    /// nothing.
+    /// Check that the node names in language configuration exist in
+    /// the relevant grammar. Names that don't occur in the grammar
+    /// never match, so a typo means the configuration does nothing.
     ///
-    /// Check that every node name we configure exists in the relevant
-    /// grammar.
-    ///
-    /// Note that we deliberately don't check the token strings in
-    /// `delimiter_tokens` and `ignore_trailing_tokens`. Those are
-    /// matched against source text rather than node names, and
-    /// grammars often use a named node for a delimiter. For example,
-    /// tree-sitter-hcl represents `${` as a
-    /// `template_interpolation_start` node, so `"${"` is a valid
-    /// delimiter token even though no node has that name.
+    /// We can't check the token strings in `delimiter_tokens` and
+    /// `ignore_trailing_tokens`, because they're matched against
+    /// source text rather than node names. Grammars sometimes use a
+    /// named node for a delimiter, so a valid token string doesn't
+    /// have to be a node name.
     #[test]
     fn test_config_node_names_exist() {
         let mut problems: Vec<String> = vec![];
@@ -2183,10 +2169,10 @@ mod tests {
                     return;
                 }
 
-                // Configuring an anonymous token is a common mistake,
-                // so mention it explicitly.
+                // Anonymous tokens are always leaves, so configuring
+                // one is a common mistake.
                 let hint = if config.language.id_for_node_kind(name, false) != 0 {
-                    " (this grammar has an anonymous token with this name, but no named node, and anonymous tokens are always leaves)"
+                    " (this grammar has an anonymous token with this name, but no named node)"
                 } else {
                     ""
                 };
@@ -2206,8 +2192,7 @@ mod tests {
             }
         }
 
-        // Sort, so the output is grouped by language and stable
-        // between runs.
+        // atom_nodes is a set, so sort for deterministic output.
         problems.sort();
 
         assert!(

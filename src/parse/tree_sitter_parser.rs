@@ -385,7 +385,7 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
 
             TreeSitterConfig {
                 language: language.clone(),
-                atom_nodes: vec!["string", "sigil", "heredoc"].into_iter().collect(),
+                atom_nodes: vec!["string", "sigil"].into_iter().collect(),
                 delimiter_tokens: vec![("(", ")"), ("{", "}"), ("do", "end")]
                     .into_iter()
                     .collect(),
@@ -535,12 +535,17 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
             TreeSitterConfig {
                 language: language.clone(),
                 atom_nodes: [
-                    "qualified_variable",
                     // Work around https://github.com/tree-sitter/tree-sitter-haskell/issues/102
-                    "qualified_module",
-                    "qualified_constructor",
+                    //
+                    // This used to be qualified_variable,
+                    // qualified_module and qualified_constructor,
+                    // which the grammar has since merged into a
+                    // single node.
+                    "qualified",
                     // Work around https://github.com/tree-sitter/tree-sitter-haskell/issues/107
-                    "strict_type",
+                    //
+                    // This used to be called strict_type.
+                    "strict_field",
                 ]
                 .into_iter()
                 .collect(),
@@ -742,14 +747,9 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
                 // structure of complex types within, but it beats
                 // ignoring nullable changes.
                 // https://github.com/Wilfred/difftastic/issues/411
-                atom_nodes: [
-                    "nullable_type",
-                    "string_literal",
-                    "line_string_literal",
-                    "character_literal",
-                ]
-                .into_iter()
-                .collect(),
+                atom_nodes: ["nullable_type", "string_literal", "character_literal"]
+                    .into_iter()
+                    .collect(),
                 delimiter_tokens: vec![("(", ")"), ("{", "}"), ("[", "]"), ("<", ">")]
                     .into_iter()
                     .collect(),
@@ -1004,7 +1004,7 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
             let language = tree_sitter::Language::new(language_fn);
             TreeSitterConfig {
                 language: language.clone(),
-                atom_nodes: ["string", "special"].into_iter().collect(),
+                atom_nodes: ["string"].into_iter().collect(),
                 delimiter_tokens: vec![("{", "}"), ("(", ")"), ("[", "]")],
                 ignore_trailing_tokens: vec![],
                 highlight_query: ts::Query::new(&language, tree_sitter_r::HIGHLIGHTS_QUERY)
@@ -1155,7 +1155,7 @@ fn build_config(language: guess::Language) -> TreeSitterConfig {
             let language = tree_sitter::Language::new(language_fn);
             TreeSitterConfig {
                 language: language.clone(),
-                atom_nodes: ["string", "identifier"].into_iter().collect(),
+                atom_nodes: ["identifier"].into_iter().collect(),
                 delimiter_tokens: vec![("(", ")")],
                 ignore_trailing_tokens: vec![],
                 highlight_query: ts::Query::new(&language, tree_sitter_sequel::HIGHLIGHTS_QUERY)
@@ -2153,5 +2153,68 @@ mod tests {
         for language in guess::Language::iter() {
             from_language(language);
         }
+    }
+
+    /// Language configuration refers to tree-sitter node names, such
+    /// as `atom_nodes`. Names that don't occur in the grammar are
+    /// silently ignored when diffing, so a typo (or a grammar upgrade
+    /// that renames nodes) leaves us with configuration that does
+    /// nothing.
+    ///
+    /// Check that every node name we configure exists in the relevant
+    /// grammar.
+    ///
+    /// Note that we deliberately don't check the token strings in
+    /// `delimiter_tokens` and `ignore_trailing_tokens`. Those are
+    /// matched against source text rather than node names, and
+    /// grammars often use a named node for a delimiter. For example,
+    /// tree-sitter-hcl represents `${` as a
+    /// `template_interpolation_start` node, so `"${"` is a valid
+    /// delimiter token even though no node has that name.
+    #[test]
+    fn test_config_node_names_exist() {
+        let mut problems: Vec<String> = vec![];
+
+        for language in guess::Language::iter() {
+            let config = from_language(language);
+
+            let mut check_node_name = |name: &str, field: &str| {
+                if config.language.id_for_node_kind(name, true) != 0 {
+                    return;
+                }
+
+                // Configuring an anonymous token is a common mistake,
+                // so mention it explicitly.
+                let hint = if config.language.id_for_node_kind(name, false) != 0 {
+                    " (this grammar has an anonymous token with this name, but no named node, and anonymous tokens are always leaves)"
+                } else {
+                    ""
+                };
+
+                problems.push(format!(
+                    "{:?}: {} refers to the node {:?}, which does not exist in this grammar{}",
+                    language, field, name, hint
+                ));
+            };
+
+            for node_name in &config.atom_nodes {
+                check_node_name(node_name, "atom_nodes");
+            }
+
+            for (node_name, _) in &config.ignore_trailing_tokens {
+                check_node_name(node_name, "ignore_trailing_tokens");
+            }
+        }
+
+        // Sort, so the output is grouped by language and stable
+        // between runs.
+        problems.sort();
+
+        assert!(
+            problems.is_empty(),
+            "Found {} node name(s) in language configuration that don't occur in the relevant tree-sitter grammar.\n\n{}",
+            problems.len(),
+            problems.join("\n")
+        );
     }
 }
